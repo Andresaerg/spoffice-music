@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout the code
@@ -28,14 +28,19 @@ jobs:
           echo "tag=latest" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.REPO_GITHUB_KEY }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build the tenant Docker Image
+      - name: Build Docker image
         run: |
           docker build -t spoffice-music:latest . \
             --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+
+      - name: Push Docker image
+        if: github.event_name == 'push'
+        run: |
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
