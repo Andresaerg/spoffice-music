@@ -1,11 +1,12 @@
 services:
   app:
-    image: ghcr.io/lmf3z/spoffice:latest
+    container_name: spoffice-music-app2
+    image: ghcr.io/lmf3z/spoffice-music:latest
     restart: unless-stopped
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - '8000:8000'
     volumes:
       - music-data:/data
 
