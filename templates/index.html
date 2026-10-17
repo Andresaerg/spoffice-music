@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Rockita office</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js" integrity="sha384-H5SrcfygHmAuTDZphMHqBJLc3FhssKjG7w/CeCpFReSfwBWDTKpkzPP8c+cLsK+V" crossorigin="anonymous"></script>
+</head>
+<body class="min-h-screen bg-[#0f0f0f] text-white">
+    <main class="mx-auto flex min-h-screen w-full max-w-[1800px] flex-col px-4 py-5 sm:px-6 lg:px-8">
+        <header class="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold">Rockita office</h1>
+                <p class="mt-1 text-sm text-slate-400">Lista de reproducción · canciones de hoy</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+                <button id="open-paste-link" type="button" class="rounded border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold hover:bg-white/10">
+                    Pegar link
+                </button>
+                <p class="text-sm text-slate-400" aria-live="polite">
+                    Llamadas a YouTube hoy: <span id="youtube-quota">Cargando…</span>
+                </p>
+                <a href="/list" class="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+                    Buscar canciones
+                </a>
+            </div>
+        </header>
+
+        <div class="grid flex-1 gap-5 lg:h-[calc(100vh-9rem)] lg:min-h-[32rem] lg:grid-cols-[minmax(0,2.2fr)_minmax(20rem,1fr)]">
+            <section class="min-w-0" aria-label="Reproductor">
+                <div id="player-controls" tabindex="0" aria-label="Área de control del reproductor. Usa las flechas arriba y abajo para cambiar el volumen." class="aspect-video overflow-hidden rounded-lg bg-black shadow-2xl shadow-black/40 focus:outline-none focus:ring-2 focus:ring-red-600">
+                    <div id="player" class="h-full w-full"></div>
+                </div>
+                <p class="mt-3 text-lg font-semibold text-white" id="now-playing" aria-live="polite">No hay canciones en la lista.</p>
+            </section>
+
+            <section class="flex min-h-0 flex-col" aria-labelledby="queue-heading">
+                <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
+                    <h2 id="queue-heading" class="text-lg font-semibold">Cola de hoy</h2>
+                    <div class="flex items-center gap-2">
+                        <button id="refresh-queue" type="button" class="rounded border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10">
+                            Actualizar
+                        </button>
+                        <button id="random-queue" type="button" class="rounded bg-red-600 px-3 py-2 text-sm font-semibold hover:bg-red-700 disabled:cursor-wait disabled:opacity-60">
+                            Generar
+                        </button>
+                    </div>
+                </div>
+                <p id="random-queue-status" class="mb-2 min-h-5 text-sm text-slate-400" aria-live="polite"></p>
+                <ol id="queue-list" class="max-h-[calc(100dvh-15rem)] min-h-0 flex-1 divide-y divide-white/10 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#181818]" aria-live="polite"></ol>
+            </section>
+        </div>
+    </main>
+
+    {{template "paste-link-modal"}}
+
+    <script>
+        const tag = document.createElement("script");
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+
+        let player;
+        let currentQueueItem = null;
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+                height: '100%',
+                width: '100%',
+                playerVars: {
+                    origin: window.location.origin,
+                    enablejsapi: 1,
+                    autoplay: 1,
+                    disablekb: 0
+                },
+                events: {
+                    onReady: onPlayerReady,
+                    onStateChange: onPlayerStateChange
+                }
+            });
+        }
+
+        function onPlayerReady() {
+            initializePlayerQueue().catch(console.error);
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data === YT.PlayerState.ENDED && currentQueueItem) {
+                fetch('/queue/finish', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: currentQueueItem.id})
+                })
+                    .then(response => {
+                        if (!response.ok) throw new Error('No se pudo finalizar la canción');
+                        currentQueueItem = null;
+                        return playNextSong();
+                    })
+                    .catch(console.error);
+            }
+        }
+
+        async function refreshQueue() {
+            const response = await fetch('/queue');
+            if (!response.ok) throw new Error('No se pudo cargar la lista');
+            renderQueue(await response.json());
+        }
+
+        async function initializePlayerQueue() {
+            const response = await fetch('/queue');
+            if (!response.ok) throw new Error('No se pudo cargar la lista');
+            const entries = await response.json();
+
+            if (entries.length === 0) {
+                const randomResponse = await fetch('/queue/random?if_empty=true', {method: 'POST'});
+                if (!randomResponse.ok) throw new Error('No se pudieron cargar canciones aleatorias');
+            }
+
+            await refreshQueue();
+            await playNextSong();
+        }
+
+        async function addRandomSongs() {
+            const button = document.querySelector('#random-queue');
+            const status = document.querySelector('#random-queue-status');
+            button.disabled = true;
+            status.textContent = 'Seleccionando canciones…';
+
+            try {
+                const response = await fetch('/queue/random', {method: 'POST'});
+                if (!response.ok) throw new Error('No se pudieron agregar canciones aleatorias');
+                const result = await response.json();
+                await refreshQueue();
+
+                status.textContent = result.added > 0
+                    ? `Se agregaron ${result.added} canciones aleatorias al final de la cola.`
+                    : 'No hay canciones nuevas disponibles para agregar.';
+            } catch (error) {
+                status.textContent = 'No se pudieron agregar canciones aleatorias.';
+                throw error;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function renderQueue(entries) {
+            const list = document.querySelector('#queue-list');
+            list.replaceChildren();
+
+            if (entries.length === 0) {
+                const empty = document.createElement('li');
+                empty.className = 'px-4 py-6 text-sm text-slate-400';
+                empty.textContent = 'No hay canciones en la lista.';
+                list.appendChild(empty);
+                return;
+            }
+
+            for (const entry of entries) {
+                const item = document.createElement('li');
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-white/5 cursor-pointer';
+                if (entry.status === 'playing') {
+                    button.classList.add('bg-white/10');
+                    button.setAttribute('aria-current', 'true');
+                }
+
+                const image = document.createElement('img');
+                image.className = 'h-12 w-16 shrink-0 rounded object-cover';
+                image.src = entry.thumbnail;
+                image.alt = '';
+
+                const text = document.createElement('span');
+                text.className = 'min-w-0 flex-1';
+                const title = document.createElement('span');
+                title.className = 'block truncate text-sm font-medium';
+                title.textContent = entry.title;
+                const status = document.createElement('span');
+                status.className = 'mt-1 block text-xs text-slate-400';
+                status.textContent = entry.status === 'playing' ? 'Reproduciendo' : entry.status === 'played' ? 'Reproducida' : 'En espera';
+                text.append(title, status);
+                button.append(image, text);
+                button.addEventListener('click', () => playQueueItem(entry.id).catch(console.error));
+                item.appendChild(button);
+                list.appendChild(item);
+            }
+        }
+
+        async function refreshYouTubeQuota() {
+            const response = await fetch('/youtube-quota');
+            if (!response.ok) throw new Error('No se pudo cargar el contador de YouTube');
+            const quota = await response.json();
+            document.querySelector('#youtube-quota').textContent = `${quota.used} / ${quota.limit}`;
+        }
+
+        async function playNextSong() {
+            const response = await fetch('/queue/next');
+            if (!response.ok) throw new Error('No se pudo obtener la siguiente canción');
+            const song = await response.json();
+
+            if (!song.id) {
+                currentQueueItem = null;
+                document.querySelector('#now-playing').textContent = 'No hay canciones en la lista.';
+                return;
+            }
+
+            currentQueueItem = song;
+            document.querySelector('#now-playing').textContent = song.title;
+            player.loadVideoById(song.videoId);
+        }
+
+        async function playQueueItem(id) {
+            const response = await fetch('/queue/play', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id})
+            });
+            if (!response.ok) throw new Error('No se pudo seleccionar la canción');
+
+            const song = await response.json();
+            currentQueueItem = song;
+            document.querySelector('#now-playing').textContent = song.title;
+            player.loadVideoById(song.videoId);
+        }
+
+        document.querySelector('#refresh-queue').addEventListener('click', () => refreshQueue().catch(console.error));
+        document.querySelector('#random-queue').addEventListener('click', () => addRandomSongs().catch(console.error));
+        document.addEventListener('youtube-link-added', event => {
+            if (event.detail.added && player && !currentQueueItem) {
+                playNextSong().catch(console.error);
+            }
+        });
+        const queueEvents = new EventSource('/queue/events');
+        queueEvents.addEventListener('queue-updated', () => {
+            refreshQueue().catch(console.error);
+        });
+        queueEvents.addEventListener('youtube-quota-updated', () => refreshYouTubeQuota().catch(console.error));
+        refreshYouTubeQuota().catch(console.error);
+    </script>
+</body>
+</html>

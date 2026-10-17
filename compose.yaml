@@ -1,0 +1,13 @@
+services:
+  app:
+    image: ghcr.io/lmf3z/spoffice:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - music-data:/data
+
+volumes:
+  music-data:

@@ -1,0 +1,133 @@
+{{define "paste-link-modal"}}
+<dialog id="paste-link-dialog" class="w-[min(92vw,32rem)] rounded-lg border border-white/10 bg-[#181818] p-0 text-white shadow-2xl backdrop:bg-black/70">
+    <form id="paste-link-form" class="grid gap-4 p-6">
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <h2 class="text-lg font-semibold">Agregar enlace de YouTube</h2>
+                <p class="mt-1 text-sm text-slate-400">El video se agregará a la lista sin usar llamadas a la API.</p>
+            </div>
+            <button id="close-paste-link" type="button" aria-label="Cerrar" class="rounded px-2 py-1 text-slate-400 hover:bg-white/10 hover:text-white">✕</button>
+        </div>
+        <label for="youtube-link-input" class="grid gap-2 text-sm font-medium">
+            Enlace del video
+            <input
+                id="youtube-link-input"
+                name="url"
+                type="url"
+                required
+                autocomplete="off"
+                placeholder="https://youtu.be/eSaa3vC_n2k"
+                class="w-full rounded border border-white/15 bg-[#0f0f0f] p-3 text-white placeholder:text-slate-500 focus:border-red-600 focus:outline-none"
+            >
+        </label>
+        <label id="youtube-title-field" for="youtube-title-input" class="hidden gap-2 text-sm font-medium">
+            Nombre del video
+            <input
+                id="youtube-title-input"
+                name="title"
+                type="text"
+                maxlength="200"
+                autocomplete="off"
+                placeholder="Escribe el título para identificar la canción"
+                class="w-full rounded border border-white/15 bg-[#0f0f0f] p-3 text-white placeholder:text-slate-500 focus:border-red-600 focus:outline-none"
+            >
+        </label>
+        <p id="paste-link-status" role="status" aria-live="polite" class="min-h-5 text-sm text-slate-400"></p>
+        <button
+            id="submit-paste-link"
+            type="submit"
+            class="rounded bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700 disabled:cursor-wait disabled:opacity-60"
+        >
+            Agregar a la lista
+        </button>
+    </form>
+</dialog>
+<div id="paste-link-toast" role="status" aria-live="polite" class="fixed bottom-5 right-5 z-50 hidden rounded bg-green-700 px-4 py-3 text-white shadow-lg"></div>
+<script>
+    (() => {
+        const dialog = document.querySelector('#paste-link-dialog');
+        const form = document.querySelector('#paste-link-form');
+        const input = document.querySelector('#youtube-link-input');
+        const titleField = document.querySelector('#youtube-title-field');
+        const titleInput = document.querySelector('#youtube-title-input');
+        const status = document.querySelector('#paste-link-status');
+        const submitButton = document.querySelector('#submit-paste-link');
+        const toast = document.querySelector('#paste-link-toast');
+        let toastTimeout;
+
+        document.querySelector('#open-paste-link').addEventListener('click', async () => {
+            input.value = '';
+            titleInput.value = '';
+            titleInput.required = false;
+            titleField.classList.add('hidden');
+            titleField.classList.remove('grid');
+            status.textContent = 'Intentando leer el portapapeles…';
+            dialog.showModal();
+            input.focus();
+
+            if (!navigator.clipboard?.readText) {
+                status.textContent = 'No se puede leer el portapapeles desde este contexto. Pega o escribe el enlace.';
+                return;
+            }
+
+            try {
+                const clipboardText = await navigator.clipboard.readText();
+                if (clipboardText.trim()) {
+                    input.value = clipboardText.trim();
+                    status.textContent = 'Enlace leído del portapapeles. Confírmalo y agrégalo.';
+                } else {
+                    status.textContent = 'El portapapeles está vacío. Pega o escribe el enlace.';
+                }
+            } catch {
+                status.textContent = 'No se pudo acceder al portapapeles. Pega o escribe el enlace manualmente.';
+            }
+        });
+
+        document.querySelector('#close-paste-link').addEventListener('click', () => dialog.close());
+        input.addEventListener('input', () => {
+            status.textContent = '';
+        });
+
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            submitButton.disabled = true;
+            status.textContent = 'Agregando el video…';
+
+            try {
+                const response = await fetch('/add-youtube-link', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: input.value.trim(), title: titleInput.value.trim()})
+                });
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch {
+                    throw new Error(responseText.trim() || 'No se pudo agregar el enlace.');
+                }
+                if (response.status === 422 && result.needs_title) {
+                    titleField.classList.remove('hidden');
+                    titleField.classList.add('grid');
+                    titleInput.required = true;
+                    status.textContent = result.message;
+                    titleInput.focus();
+                    return;
+                }
+                if (!response.ok) throw new Error(result.error || responseText.trim());
+
+                dialog.close();
+                toast.textContent = result.message;
+                toast.classList.remove('hidden');
+                clearTimeout(toastTimeout);
+                toastTimeout = setTimeout(() => toast.classList.add('hidden'), 5000);
+                document.dispatchEvent(new CustomEvent('youtube-link-added', {detail: {added: result.added}}));
+            } catch (error) {
+                status.textContent = error.message || 'No se pudo agregar el enlace.';
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+    })();
+</script>
+{{end}}
