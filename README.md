@@ -10,7 +10,6 @@ El servidor escucha en el puerto `8000` y guarda la base de datos SQLite en
   en [`go.mod`](./go.mod).
 - Para contenedores: Docker Engine; Docker Compose v2 para el despliegue con
   Compose.
-- Una clave de YouTube Data API para buscar videos.
 
 ## Configuración
 
@@ -24,11 +23,8 @@ Edita `.env` y configura:
 
 | Variable          | Descripción                                                                                                      |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `YOUTUBE_API_KEY` | Clave de YouTube Data API usada para las búsquedas.                                                              |
-| `YOUTUBE_API_URL` | URL base de la API. Normalmente `https://www.googleapis.com/youtube/v3`.                                         |
 | `DATABASE_PATH`   | Ruta del archivo de SQLite. Usa `./data/music.db` para ejecución local y `/data/music.db` dentro del contenedor. |
 
-No agregues claves reales al repositorio. `.env` está excluido de Git.
 
 ## Ejecución local con Go
 

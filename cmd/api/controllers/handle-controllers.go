@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -24,25 +25,19 @@ var youtubeVideoIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 
 type Handlers struct {
 	queueRepository  repository.QueueRepository
-	quotaRepository  repository.YouTubeQuotaRepository
 	queueEventsMu    sync.Mutex
 	queueSubscribers map[chan string]struct{}
 }
 
-func NewHandlers(queueRepository repository.QueueRepository, quotaRepository repository.YouTubeQuotaRepository) *Handlers {
+func NewHandlers(queueRepository repository.QueueRepository) *Handlers {
 	return &Handlers{
 		queueRepository:  queueRepository,
-		quotaRepository:  quotaRepository,
 		queueSubscribers: make(map[chan string]struct{}),
 	}
 }
 
 func (h *Handlers) NotifyQueueChanged() {
 	h.notify("queue-updated")
-}
-
-func (h *Handlers) NotifyQuotaChanged() {
-	h.notify("youtube-quota-updated")
 }
 
 func (h *Handlers) notify(event string) {
@@ -144,60 +139,28 @@ func (h *Handlers) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil || len(resp) == 0 {
-		calls, allowed, quotaErr := h.quotaRepository.ReserveCall(r.Context())
-		if quotaErr != nil {
-			http.Error(w, "Error reserving YouTube API call", http.StatusInternalServerError)
-			return
-		}
-		if !allowed {
-			w.Header().Set("X-YouTube-Quota-Used", fmt.Sprintf("%d", calls))
-			w.Header().Set("X-YouTube-Quota-Limit", fmt.Sprintf("%d", repository.DailyYouTubeCallLimit))
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusTooManyRequests)
-			fmt.Fprintf(w, `<li class="text-amber-700">Ya no hay más llamadas a YouTube por hoy. Inténtalo de nuevo mañana. (%d/%d)</li>`, calls, repository.DailyYouTubeCallLimit)
-			return
-		}
-		h.NotifyQuotaChanged()
-
 		resp, err = request.GetMusicList(query, "/search")
-
 		if err != nil {
 			http.Error(w, "Error fetching music list", http.StatusInternalServerError)
 			return
 		}
+	}
 
+	entries, err := h.queueRepository.ListDailyQueue(r.Context())
+	if err == nil && len(entries) > 0 {
+		inQueue := make(map[string]bool, len(entries))
+		for _, e := range entries {
+			inQueue[e.VideoID] = true
+		}
+		for i := range resp {
+			resp[i].InQueue = inQueue[resp[i].VideoID]
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := templates.ExecuteTemplate(w, "item-list-result.html", resp); err != nil {
 		http.Error(w, "Error rendering results", http.StatusInternalServerError)
-	}
-}
-
-func (h *Handlers) YouTubeQuotaHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	calls, err := h.quotaRepository.GetCallCount(r.Context())
-	if err != nil {
-		http.Error(w, "Error fetching YouTube API call count", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(struct {
-		Used      int `json:"used"`
-		Limit     int `json:"limit"`
-		Remaining int `json:"remaining"`
-	}{
-		Used:      calls,
-		Limit:     repository.DailyYouTubeCallLimit,
-		Remaining: repository.DailyYouTubeCallLimit - calls,
-	}); err != nil {
-		http.Error(w, "Error encoding YouTube API call count", http.StatusInternalServerError)
 	}
 }
 
@@ -215,7 +178,16 @@ func (h *Handlers) AddToPlaylistHandler(w http.ResponseWriter, r *http.Request) 
 		Thumbnail:   r.FormValue("thumbnail"),
 	}
 
-	added, err := h.queueRepository.AddToQueue(r.Context(), queue)
+	isNext := r.FormValue("play_next") == "true" || r.URL.Query().Get("next") == "true"
+
+	var added bool
+	var err error
+	if isNext {
+		added, err = h.queueRepository.AddToQueueNext(r.Context(), queue)
+	} else {
+		added, err = h.queueRepository.AddToQueue(r.Context(), queue)
+	}
+
 	if err != nil {
 		http.Error(w, "Error adding music to playlist", http.StatusInternalServerError)
 		return
@@ -226,24 +198,53 @@ func (h *Handlers) AddToPlaylistHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	message := "Canción agregada a la lista"
+	if isNext {
+		message = "Canción agregada para reproducir a continuación"
+	}
 	status := http.StatusCreated
-	toastClass := "fixed top-5 right-5 rounded bg-green-600 px-4 py-3 text-white shadow-lg"
+	toastClass := "fixed top-5 right-5 z-[100] rounded bg-green-600 px-4 py-3 text-white shadow-xl cursor-pointer select-none flex items-center justify-between gap-3 transition-all duration-300"
 	if !added {
 		message = "La canción ya está en la lista de hoy"
 		status = http.StatusOK
-		toastClass = "fixed top-5 right-5 rounded bg-slate-700 px-4 py-3 text-white shadow-lg"
+		toastClass = "fixed top-5 right-5 z-[100] rounded bg-slate-700 px-4 py-3 text-white shadow-xl cursor-pointer select-none flex items-center justify-between gap-3 transition-all duration-300"
 	}
 	w.WriteHeader(status)
+
+	badgeText := "Agregada a la cola"
+	if isNext {
+		badgeText = "Siguiente en cola"
+	}
+	if !added {
+		badgeText = "Ya en la cola"
+	}
+
+	videoIDAttr := html.EscapeString(queue.VideoID)
+	titleAttr := html.EscapeString(queue.Title)
+	descAttr := html.EscapeString(queue.Description)
+	thumbAttr := html.EscapeString(queue.Thumbnail)
 
 	fmt.Fprintf(w, `
         <div
             id="toast"
             hx-swap-oob="true"
             class="%s"
+            onclick="this.classList.add('hidden')"
+            title="Toca para cerrar"
         >
-            %s
+            <span>%s</span>
+            <button type="button" class="text-xs opacity-75 hover:opacity-100 font-bold ml-2">✕</button>
         </div>
-	`, toastClass, message)
+        <form class="flex flex-wrap items-center gap-2" data-video-id="%s">
+            <input type="hidden" name="video_id" value="%s">
+            <input type="hidden" name="title" value="%s">
+            <input type="hidden" name="description" value="%s">
+            <input type="hidden" name="thumbnail" value="%s">
+            <button disabled type="button" class="cursor-default inline-flex items-center gap-1.5 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 opacity-90">
+                <svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <span>%s</span>
+            </button>
+        </form>
+	`, toastClass, message, videoIDAttr, videoIDAttr, titleAttr, descAttr, thumbAttr, badgeText)
 }
 
 func (h *Handlers) AddYouTubeLinkHandler(w http.ResponseWriter, r *http.Request) {
@@ -470,6 +471,77 @@ func (h *Handlers) FinishQueueHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error finishing song", http.StatusInternalServerError)
 		return
 	}
+	h.NotifyQueueChanged()
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *Handlers) RemoveQueueItemHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.ID == 0 {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.queueRepository.RemoveQueueItem(r.Context(), payload.ID); err != nil {
+		http.Error(w, "Error removing item from queue", http.StatusInternalServerError)
+		return
+	}
+	h.NotifyQueueChanged()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (h *Handlers) ReorderQueueHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "ids are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.queueRepository.ReorderQueue(r.Context(), payload.IDs); err != nil {
+		http.Error(w, "Error reordering queue", http.StatusInternalServerError)
+		return
+	}
+	h.NotifyQueueChanged()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (h *Handlers) SearchSuggestionsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		query = r.URL.Query().Get("q")
+	}
+
+	suggestions, err := request.SearchSuggestions(query)
+	if err != nil {
+		suggestions = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
+
+
