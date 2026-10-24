@@ -24,6 +24,7 @@ Edita `.env` y configura:
 | Variable          | Descripción                                                                                                      |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_PATH`   | Ruta del archivo de SQLite. Usa `./data/music.db` para ejecución local y `/data/music.db` dentro del contenedor. |
+| `INVIDIOUS_HOST`  | (Opcional) URL de la instancia de Invidious. Por defecto: `https://invidious.f5.si`.                             |
 
 
 ## Ejecución local con Go

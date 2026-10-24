@@ -18,7 +18,7 @@ func GetHashtagMusic(tag string) ([]models.YTSong, error) {
 		tag = "music"
 	}
 
-	endpoint := strings.TrimRight(config.InvidiousHost, "/") + "/api/v1/hashtag/" + url.PathEscape(tag)
+	endpoint := strings.TrimRight(config.InvidiousHost(), "/") + "/api/v1/hashtag/" + url.PathEscape(tag)
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {

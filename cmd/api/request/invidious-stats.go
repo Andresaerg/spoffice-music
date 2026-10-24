@@ -11,7 +11,7 @@ import (
 // InvidiousStats makes a GET request to the invidious API to get the stats, used to check
 // availability and test usage (api/v1/stats).
 func InvidiousStats() (models.InvidiousStats, error) {
-	resp, err := http.Get(config.InvidiousHost + "/api/v1/stats")
+	resp, err := http.Get(config.InvidiousHost() + "/api/v1/stats")
 	if err != nil {
 		return models.InvidiousStats{}, err
 	}

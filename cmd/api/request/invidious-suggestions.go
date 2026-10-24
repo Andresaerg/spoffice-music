@@ -18,7 +18,7 @@ func SearchSuggestions(query string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	endpoint := strings.TrimRight(config.InvidiousHost, "/") + "/api/v1/search/suggestions?q=" + url.QueryEscape(q)
+	endpoint := strings.TrimRight(config.InvidiousHost(), "/") + "/api/v1/search/suggestions?q=" + url.QueryEscape(q)
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {

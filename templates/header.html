@@ -2,7 +2,7 @@
 <header class="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
     <div>
         <div class="flex items-center gap-2">
-            <a href="{{if eq .CurrentPage " list"}}list{{else}}/{{end}}" class="cursor-pointer">
+            <a id="brand-link" href="/" class="cursor-pointer">
                 <h1 class="text-2xl font-bold">Rockita office</h1>
             </a>
             {{if or .InvidiousVersion .SoftwareVersion}}
@@ -18,7 +18,7 @@
             class="rounded border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold hover:bg-white/10 cursor-pointer">
             Pegar link
         </button>
-        <a id="view-toggle-btn" href="{{if eq .CurrentPage " list"}}/{{else}}/list{{end}}"
+        <a id="view-toggle-btn" href="{{if eq .CurrentPage "list"}}/{{else}}/list{{end}}"
             class="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 cursor-pointer transition-colors">
             {{if eq .CurrentPage "list"}}Abrir reproductor{{else}}Buscar canciones{{end}}
         </a>

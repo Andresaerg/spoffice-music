@@ -45,7 +45,7 @@ func SearchInvidiousWithParams(p models.InvidiousSearchParams) ([]models.Invidio
 		values.Set("region", p.Region)
 	}
 
-	endpoint := strings.TrimRight(config.InvidiousHost, "/") + "/api/v1/search?" + values.Encode()
+	endpoint := strings.TrimRight(config.InvidiousHost(), "/") + "/api/v1/search?" + values.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {

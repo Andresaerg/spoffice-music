@@ -98,6 +98,16 @@ window.MusicApp = window.MusicApp || {};
             });
         }
 
+        const brandLink = document.querySelector('#brand-link');
+        if (brandLink) {
+            brandLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (currentView !== 'player') {
+                    app.switchView('player');
+                }
+            });
+        }
+
         const miniExpandBtn = document.querySelector('#mini-expand-btn');
         if (miniExpandBtn) {
             miniExpandBtn.addEventListener('click', () => app.switchView('player'));

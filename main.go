@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -113,11 +114,11 @@ func markSongsInQueue(ctx context.Context, repo repository.QueueRepository, song
 func getPageData(currentPage, subtitle string) PageData {
 	stats := getInvidiousStats()
 	return PageData{
-		InvidiousVersion: stats.Version,
+		InvidiousVersion: cmp.Or(stats.Version, "Owned Host"),
 		SoftwareVersion:  stats.Software.Version,
 		Subtitle:         subtitle,
 		CurrentPage:      currentPage,
-		InvidiousHost:    config.InvidiousHost,
+		InvidiousHost:    config.InvidiousHost(),
 	}
 }
 
