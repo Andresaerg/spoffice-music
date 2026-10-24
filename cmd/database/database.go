@@ -51,15 +51,6 @@ func Connect() *sql.DB {
 		panic(err)
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS daily_youtube_api_calls (
-			call_date TEXT PRIMARY KEY,
-			calls INTEGER NOT NULL DEFAULT 0
-		)
-	`)
-	if err != nil {
-		panic(err)
-	}
 
 	_, err = db.Exec("CREATE INDEX IF NOT EXISTS idx_daily_queue_order ON daily_queue(queue_date, status, position)")
 	if err != nil {

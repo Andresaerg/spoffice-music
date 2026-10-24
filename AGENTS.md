@@ -7,8 +7,8 @@
 - HTML templates are in `templates/`. The server listens on port `8000`.
 - SQLite is provided by `modernc.org/sqlite`. `DATABASE_PATH` selects the
   database file; when unset, the application uses `./music.db`.
-- YouTube search configuration comes from `YOUTUBE_API_KEY` and
-  `YOUTUBE_API_URL`. Do not commit secrets or local database files.
+- YouTube music search is powered by Invidious. Do not commit secrets or
+  local database files.
 - The Docker image runs as UID/GID `10001`, stores persistent data under
   `/data`, and the Compose deployment uses the prebuilt GHCR image.
 

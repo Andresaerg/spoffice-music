@@ -143,4 +143,24 @@ const (
 		DELETE FROM daily_queue
 		WHERE queue_date <= ?
 	`
+	removeQueueItemQuery = `
+		DELETE FROM daily_queue
+		WHERE id = ? AND queue_date = ?
+	`
+	updateQueueItemPositionQuery = `
+		UPDATE daily_queue
+		SET position = ?
+		WHERE id = ? AND queue_date = ?
+	`
+	countQueueQuery = `
+		SELECT COUNT(*)
+		FROM daily_queue
+		WHERE queue_date = ?
+	`
+	currentPlayingPositionQuery = `
+		SELECT position
+		FROM daily_queue
+		WHERE queue_date = ? AND status = 'playing'
+		LIMIT 1
+	`
 )
