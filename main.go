@@ -6,11 +6,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/joho/godotenv"
