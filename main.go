@@ -1,3 +1,4 @@
+//go:generate go tool templ generate
 package main
 
 import (
@@ -6,7 +7,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -21,24 +21,13 @@ import (
 	"github.com/lmf3z/smlf/cmd/config"
 	"github.com/lmf3z/smlf/cmd/database"
 	"github.com/lmf3z/smlf/cmd/models"
+	"github.com/lmf3z/smlf/components"
+	"github.com/lmf3z/smlf/internal/room"
 	"github.com/lmf3z/smlf/static"
-	webtemplates "github.com/lmf3z/smlf/templates"
 )
 
 //go:embed yt-music-lite-rmbg.png
 var faviconBytes []byte
-
-type PageData struct {
-	InvidiousVersion string
-	SoftwareVersion  string
-	Subtitle         string
-	CurrentPage      string
-	InvidiousHost    string
-	Songs            []models.YTSong
-	PreloadTag       string
-	QueueTotal       int
-	QueueCurrent     int
-}
 
 var (
 	cachedStatsMu   sync.Mutex
@@ -103,7 +92,9 @@ func markSongsInQueue(ctx context.Context, repo repository.QueueRepository, song
 	}
 	inQueue := make(map[string]bool, len(entries))
 	for _, entry := range entries {
-		inQueue[entry.VideoID] = true
+		if entry.Status != "played" {
+			inQueue[entry.VideoID] = true
+		}
 	}
 	for i := range result {
 		result[i].InQueue = inQueue[result[i].VideoID]
@@ -111,14 +102,15 @@ func markSongsInQueue(ctx context.Context, repo repository.QueueRepository, song
 	return result
 }
 
-func getPageData(currentPage, subtitle string) PageData {
+func getPageViewModel(currentPage, subtitle string, roomSnap room.RoomSnapshot) components.PageViewModel {
 	stats := getInvidiousStats()
-	return PageData{
+	return components.PageViewModel{
 		InvidiousVersion: cmp.Or(stats.Version, "Owned Host"),
 		SoftwareVersion:  stats.Software.Version,
 		Subtitle:         subtitle,
 		CurrentPage:      currentPage,
 		InvidiousHost:    config.InvidiousHost(),
+		Room:             roomSnap,
 	}
 }
 
@@ -130,7 +122,10 @@ func main() {
 	db := database.Connect()
 	defer db.Close()
 	queueRepository := repository.NewSQLQueueRepository(db)
-	handlers := controllers.NewHandlers(queueRepository)
+
+	roomState := room.NewRoomState()
+	hub := room.NewHub(roomState, queueRepository, components.RoomBroadcastOOB, components.RoomPlaybackOOB)
+	handlers := controllers.NewHandlers(queueRepository, hub)
 
 	caracas, err := time.LoadLocation("America/Caracas")
 	if err != nil {
@@ -143,38 +138,39 @@ func main() {
 	}
 	if err := queueRepository.CleanQueueThroughDate(context.Background(), cleanupDate.Format("2006-01-02")); err != nil {
 		log.Printf("Error cleaning expired playlist: %v", err)
-	} else {
-		handlers.NotifyQueueChanged()
+	}
+	if _, err := hub.SyncFromRepository(context.Background()); err != nil {
+		log.Printf("Error initializing room state from repository: %v", err)
 	}
 	go scheduleDailyQueueCleanup(queueRepository, handlers, caracas)
 
-	temp := template.Must(template.ParseFS(webtemplates.Files, "*.html"))
+	renderIndex := func(w http.ResponseWriter, r *http.Request, pageName, subtitle string) {
+		roomSnap := roomState.Snapshot()
+		if roomSnap.CurrentTrack == nil && roomSnap.QueueTotal == 0 {
+			roomSnap, _ = hub.SyncFromRepository(r.Context())
+		}
+		vm := getPageViewModel(pageName, subtitle, roomSnap)
+		cachedSongs := getPreloadedHashtagSongs("rock")
+		preloadTag := "rock"
+		if len(cachedSongs) == 0 {
+			if savedSongs, err := queueRepository.ListSavedMusics(r.Context(), 12); err == nil && len(savedSongs) > 0 {
+				cachedSongs = savedSongs
+				preloadTag = "biblioteca"
+			}
+		}
+		vm.Songs = markSongsInQueue(r.Context(), queueRepository, cachedSongs)
+		vm.PreloadTag = preloadTag
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := components.IndexPage(vm).Render(r.Context(), w); err != nil {
+			log.Printf("Error rendering index page: %v", err)
+		}
+	}
 
 	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
-		pageData := getPageData("list", "Busca canciones y administra la cola de hoy")
-		cachedSongs := getPreloadedHashtagSongs("rock")
-		pageData.Songs = markSongsInQueue(r.Context(), queueRepository, cachedSongs)
-		pageData.PreloadTag = "rock"
-		if total, err := queueRepository.CountQueue(r.Context()); err == nil {
-			pageData.QueueTotal = total
-		}
-		if curr, err := queueRepository.CurrentPlayingPosition(r.Context()); err == nil {
-			pageData.QueueCurrent = curr
-		}
-		temp.ExecuteTemplate(w, "index.html", pageData)
+		renderIndex(w, r, "list", "Busca canciones y administra la cola de hoy")
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		pageData := getPageData("home", "Lista de reproducción · canciones de hoy")
-		cachedSongs := getPreloadedHashtagSongs("rock")
-		pageData.Songs = markSongsInQueue(r.Context(), queueRepository, cachedSongs)
-		pageData.PreloadTag = "rock"
-		if total, err := queueRepository.CountQueue(r.Context()); err == nil {
-			pageData.QueueTotal = total
-		}
-		if curr, err := queueRepository.CurrentPlayingPosition(r.Context()); err == nil {
-			pageData.QueueCurrent = curr
-		}
-		temp.ExecuteTemplate(w, "index.html", pageData)
+		renderIndex(w, r, "home", "Lista de reproducción · canciones de hoy")
 	})
 
 	var staticFS http.FileSystem
@@ -194,17 +190,30 @@ func main() {
 	}
 	http.HandleFunc("/yt-music-lite-rmbg.png", faviconHandler)
 	http.HandleFunc("/favicon.ico", faviconHandler)
+
+	// Search & Queue Addition Endpoints
 	http.HandleFunc("/search", handlers.SearchHandler)
 	http.HandleFunc("/search/suggestions", handlers.SearchSuggestionsHandler)
 	http.HandleFunc("/add-to-queue", handlers.AddToPlaylistHandler)
 	http.HandleFunc("/add-youtube-link", handlers.AddYouTubeLinkHandler)
-	http.HandleFunc("/queue", handlers.ListQueueHandler)
+
+	// Synchronized Room Endpoints (SSE + HTMX OOB + Alpine.js Bridge)
+	http.HandleFunc("/room/events", hub.EventsHandler)
+	http.HandleFunc("/room/play", hub.HandlePlay)
+	http.HandleFunc("/room/pause", hub.HandlePause)
+	http.HandleFunc("/room/skip", hub.HandleSkip)
+	http.HandleFunc("/room/play-item", hub.HandlePlayItem)
+	http.HandleFunc("/room/claim-host", hub.HandleClaimHost)
+	http.HandleFunc("/room/invidious-check", handlers.InvidiousCheckHandler)
+	http.HandleFunc("/room/host-sync", hub.HandleHostSync)
+	http.HandleFunc("/room/track-ended", hub.HandleTrackEnded)
+	http.HandleFunc("/room/queue/remove", hub.HandleRemoveQueueItem)
+	http.HandleFunc("/room/queue/clear-played", hub.HandleClearPlayed)
+	http.HandleFunc("/room/queue/move-next", hub.HandleMoveItemNext)
+
+	// Queue Action Endpoints
+	http.HandleFunc("/queue/refresh", handlers.RefreshQueueHandler)
 	http.HandleFunc("/queue/random", handlers.AddRandomMusicsToQueueHandler)
-	http.HandleFunc("/queue/events", handlers.QueueEventsHandler)
-	http.HandleFunc("/queue/play", handlers.PlayQueueItemHandler)
-	http.HandleFunc("/queue/next", handlers.NextQueueHandler)
-	http.HandleFunc("/queue/finish", handlers.FinishQueueHandler)
-	http.HandleFunc("/queue/delete", handlers.RemoveQueueItemHandler)
 	http.HandleFunc("/queue/reorder", handlers.ReorderQueueHandler)
 
 	fmt.Println("starting server en http://0.0.0.0:8000")

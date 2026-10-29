@@ -18,19 +18,28 @@ func Connect() *sql.DB {
 		panic(err)
 	}
 
+	_, _ = db.Exec("PRAGMA journal_mode = WAL;")
+	_, _ = db.Exec("PRAGMA busy_timeout = 5000;")
+
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS musics (
 			id INTEGER PRIMARY KEY,
 			videoId TEXT NOT NULL UNIQUE,
 			title TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			thumbnail TEXT NOT NULL DEFAULT ''
+			thumbnail TEXT NOT NULL DEFAULT '',
+			play_count INTEGER NOT NULL DEFAULT 0,
+			last_played_at TEXT
 		)
 	`)
 
 	if err != nil {
 		panic(err)
 	}
+
+	// Safe non-destructive migration for existing databases
+	_, _ = db.Exec("ALTER TABLE musics ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE musics ADD COLUMN last_played_at TEXT")
 
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS daily_queue (

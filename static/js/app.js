@@ -6,15 +6,26 @@ window.MusicApp = window.MusicApp || {};
     let currentView = appConfigEl?.dataset.currentPage === 'list' ? 'search' : 'player';
     let toastTimeout;
 
-    // Toast notifications
-    app.scheduleToastDismiss = function (toastElement) {
+    // Toast notifications (auto-dismiss after 3 seconds)
+    app.hideToast = function (toastElement) {
         const toast = toastElement || document.querySelector('#toast');
         if (!toast) return;
         clearTimeout(toastTimeout);
-        toast.onclick = () => toast.classList.add('hidden');
+        toast.classList.add('hidden');
+        toast.classList.remove('flex');
+        toast.style.display = 'none';
+    };
+
+    app.scheduleToastDismiss = function (toastElement, durationMs = 3000) {
+        const toast = toastElement || document.querySelector('#toast');
+        if (!toast) return;
+        clearTimeout(toastTimeout);
+        toast.style.display = '';
+        toast.classList.remove('hidden');
+        toast.onclick = () => app.hideToast(toast);
         toastTimeout = setTimeout(() => {
-            toast.classList.add('hidden');
-        }, 3500);
+            app.hideToast(toast);
+        }, durationMs);
     };
 
     // SPA View Switching & Mini Player Logic
@@ -37,14 +48,19 @@ window.MusicApp = window.MusicApp || {};
             queueSection?.classList.add('hidden');
 
             if (playerSection) {
-                playerSection.className = 'fixed bottom-5 right-5 z-50 w-80 sm:w-96 rounded-xl border border-white/20 bg-[#181818]/95 shadow-2xl shadow-black/90 backdrop-blur-md overflow-hidden ring-1 ring-black/50 transition-all duration-300';
+                playerSection.className = 'fixed inset-x-3 bottom-3 z-50 sm:left-auto sm:right-5 sm:bottom-5 sm:w-96 rounded-xl border border-white/20 bg-[#181818]/95 shadow-2xl shadow-black/90 backdrop-blur-md overflow-hidden ring-1 ring-black/50 transition-all duration-300';
             }
             miniPlayerHeader?.classList.remove('hidden');
             fullPlayerHeader?.classList.add('hidden');
             fullPlayerFooter?.classList.add('hidden');
 
             if (viewToggleBtn) {
-                viewToggleBtn.textContent = 'Abrir reproductor';
+                viewToggleBtn.innerHTML = `
+                    <svg class="size-4" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"></path>
+                    </svg>
+                    <span id="view-toggle-label">Abrir reproductor</span>
+                `;
                 viewToggleBtn.href = '/';
             }
             if (headerSubtitle) {
@@ -57,7 +73,7 @@ window.MusicApp = window.MusicApp || {};
         } else {
             searchView?.classList.add('hidden');
             if (playerGridView) {
-                playerGridView.className = 'grid flex-1 gap-5 lg:h-[calc(100vh-9rem)] lg:min-h-[32rem] lg:grid-cols-[minmax(0,2.2fr)_minmax(20rem,1fr)]';
+                playerGridView.className = 'grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 lg:h-[calc(100vh-8.5rem)] lg:min-h-[32rem] lg:grid-cols-[minmax(0,2.1fr)_minmax(22rem,1fr)] lg:gap-6';
             }
             queueSection?.classList.remove('hidden');
 
@@ -69,7 +85,12 @@ window.MusicApp = window.MusicApp || {};
             fullPlayerFooter?.classList.remove('hidden');
 
             if (viewToggleBtn) {
-                viewToggleBtn.textContent = 'Buscar canciones';
+                viewToggleBtn.innerHTML = `
+                    <svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <span id="view-toggle-label">Buscar canciones</span>
+                `;
                 viewToggleBtn.href = '/list';
             }
             if (headerSubtitle) {
@@ -113,11 +134,6 @@ window.MusicApp = window.MusicApp || {};
             miniExpandBtn.addEventListener('click', () => app.switchView('player'));
         }
 
-        const miniSkipBtn = document.querySelector('#mini-skip-btn');
-        if (miniSkipBtn) {
-            miniSkipBtn.addEventListener('click', () => app.skipCurrentSong().catch(console.error));
-        }
-
         window.addEventListener('popstate', () => {
             const isList = window.location.pathname.startsWith('/list');
             app.switchView(isList ? 'search' : 'player', false);
@@ -139,6 +155,11 @@ window.MusicApp = window.MusicApp || {};
             refreshBtn.addEventListener('click', () => app.refreshQueue().catch(console.error));
         }
 
+        const clearPlayedBtn = document.querySelector('#clear-played-queue');
+        if (clearPlayedBtn) {
+            clearPlayedBtn.addEventListener('click', () => app.clearPlayedSongs().catch(console.error));
+        }
+
         const randomBtn = document.querySelector('#random-queue');
         if (randomBtn) {
             randomBtn.addEventListener('click', () => app.addRandomSongs().catch(console.error));
@@ -155,32 +176,19 @@ window.MusicApp = window.MusicApp || {};
             engineInvidiousBtn.addEventListener('click', () => app.switchPlayerEngine('invidious'));
         }
 
-        const skipSongBtn = app.getSkipSongBtn();
-        if (skipSongBtn) {
-            skipSongBtn.addEventListener('click', () => app.skipCurrentSong().catch(console.error));
-        }
-
         app.updateEngineUI();
 
-        // HTMX & Toast Event Listeners
-        document.body.addEventListener('htmx:oobAfterSwap', () => {
-            const toast = document.querySelector('#toast');
-            if (toast && !toast.classList.contains('hidden')) {
-                app.scheduleToastDismiss(toast);
-            }
-        });
-
-        document.body.addEventListener('htmx:afterSettle', () => {
-            const toast = document.querySelector('#toast');
-            if (toast && !toast.classList.contains('hidden') && toast.textContent.trim()) {
-                app.scheduleToastDismiss(toast);
+        // HTMX & Toast Event Listeners (only schedule dismiss when #toast itself is swapped, not on 1.5s SSE ticks)
+        document.body.addEventListener('htmx:oobAfterSwap', (event) => {
+            if (event.detail?.target?.id === 'toast') {
+                app.scheduleToastDismiss(event.detail.target);
             }
         });
 
         document.addEventListener('click', (e) => {
             const toast = e.target.closest('#toast');
             if (toast) {
-                toast.classList.add('hidden');
+                app.hideToast(toast);
             }
         });
     }

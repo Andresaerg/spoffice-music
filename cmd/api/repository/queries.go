@@ -55,7 +55,7 @@ const (
 				FROM daily_queue
 				WHERE queue_date = ? AND music_id = musics.id
 			)
-			ORDER BY RANDOM()
+			ORDER BY CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END, play_count ASC, RANDOM()
 			LIMIT ?
 		)
 		INSERT INTO daily_queue (queue_date, music_id, position)
@@ -66,6 +66,12 @@ const (
 		WHERE ? = 0 OR NOT EXISTS (
 			SELECT 1 FROM daily_queue WHERE queue_date = ?
 		)
+	`
+	listSavedMusicsQuery = `
+		SELECT videoId, title, description, thumbnail
+		FROM musics
+		ORDER BY RANDOM()
+		LIMIT ?
 	`
 	listDailyQueueQuery = `
 		SELECT q.id, q.position, m.videoId, m.title, m.description, m.thumbnail, q.status
@@ -138,6 +144,11 @@ const (
 		UPDATE daily_queue
 		SET status = 'played', finished_at = CURRENT_TIMESTAMP
 		WHERE id = ?
+	`
+	incrementMusicPlayCountForQueueItemQuery = `
+		UPDATE musics
+		SET play_count = play_count + 1, last_played_at = CURRENT_TIMESTAMP
+		WHERE id = (SELECT music_id FROM daily_queue WHERE id = ?)
 	`
 	cleanQueueThroughDateQuery = `
 		DELETE FROM daily_queue

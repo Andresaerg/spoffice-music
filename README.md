@@ -36,14 +36,17 @@ Para guardar la base de datos dentro del proyecto, crea el directorio y cambia
 mkdir -p data
 ```
 
-Descarga las dependencias e inicia el servidor:
+Descarga las dependencias, genera los componentes `templ` e inicia el servidor:
 
 ```sh
 go mod download
+go tool templ generate
 go run .
 ```
 
 Abre <http://localhost:8000>.
+- **Modo Host (Audio activo en la oficina):** El equipo principal que accede mediante <http://localhost:8000> (o `127.0.0.1`) actúa automáticamente como **Host** (salida de audio activa y reloj maestro de la sala).
+- **Modo Remoto (Controlador silenciado):** Cualquier otro equipo o teléfono en la red local que acceda mediante `http://<IP_LOCAL>:8000` entra automáticamente en **Modo Remoto** (audio silenciado). Para simular un cliente remoto desde el mismo equipo principal, abre <http://localhost:8000/?mode=remote>.
 
 ## Construir y ejecutar con Docker
 

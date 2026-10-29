@@ -1,0 +1,71 @@
+package components
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/lmf3z/smlf/internal/room"
+)
+
+func syncTrackID(t *room.Track) string {
+	if t == nil {
+		return ""
+	}
+	return t.VideoID
+}
+
+func syncQueueEntryID(t *room.Track) string {
+	if t == nil || t.QueueEntryID == 0 {
+		return "0"
+	}
+	return strconv.FormatInt(t.QueueEntryID, 10)
+}
+
+func syncTrackTitle(t *room.Track) string {
+	if t == nil {
+		return ""
+	}
+	return t.Title
+}
+
+func syncStartTimeUnix(state room.RoomSnapshot) string {
+	if state.CurrentTrack == nil || state.StartedAt.IsZero() {
+		return "0"
+	}
+	return strconv.FormatInt(state.StartedAt.Unix(), 10)
+}
+
+func syncPauseOffsetSeconds(state room.RoomSnapshot) string {
+	if state.CurrentTrack == nil {
+		return "0"
+	}
+	return fmt.Sprintf("%.3f", state.PauseOffset.Seconds())
+}
+
+func syncDurationSeconds(t *room.Track) string {
+	if t == nil || t.Duration <= 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.3f", t.Duration.Seconds())
+}
+
+// SyncMeta renders the invisible state beacon (#player-sync-trigger) updated via hx-swap-oob="outerHTML".
+templ SyncMeta(state room.RoomSnapshot, oob bool) {
+	<div
+		id="player-sync-trigger"
+		if oob {
+			hx-swap-oob="outerHTML"
+		}
+		class="hidden"
+		aria-hidden="true"
+		data-track-id={ syncTrackID(state.CurrentTrack) }
+		data-queue-entry-id={ syncQueueEntryID(state.CurrentTrack) }
+		data-track-title={ syncTrackTitle(state.CurrentTrack) }
+		data-status={ string(state.Status) }
+		data-engine={ state.Engine }
+		data-start-time={ syncStartTimeUnix(state) }
+		data-pause-offset={ syncPauseOffsetSeconds(state) }
+		data-duration={ syncDurationSeconds(state.CurrentTrack) }
+		data-sync-seq={ strconv.FormatUint(state.SyncSeq, 10) }
+	></div>
+}
